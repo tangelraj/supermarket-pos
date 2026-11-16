@@ -1,60 +1,104 @@
 
 import axios from "axios";
 
+// ============================================================
+// API CONFIGURATION
+// ============================================================
+
 const api = axios.create({
   baseURL:
     import.meta.env.VITE_API_URL ||
     "http://127.0.0.1:8000/api/",
-  timeout: 10000,
 
-  // Send Django session cookies
+  timeout: 30000,
+
+  // Required for Django session authentication
   withCredentials: true,
 
-  // Django CSRF configuration
+  // CSRF settings for local same-origin cookie access.
+  // Cross-origin requests use the token returned by Django.
   xsrfCookieName: "csrftoken",
   xsrfHeaderName: "X-CSRFToken",
   withXSRFToken: true,
 });
 
-function getCookie(name) {
-  const cookies = document.cookie.split(";");
 
-  for (const cookie of cookies) {
-    const [key, ...value] = cookie.trim().split("=");
+// ============================================================
+// CSRF TOKEN MANAGEMENT
+// ============================================================
 
-    if (key === name) {
-      return decodeURIComponent(value.join("="));
-    }
+// Token received from GET /api/auth/session/
+let csrfToken = null;
+
+export const setCsrfToken = (token) => {
+  csrfToken = token || null;
+};
+
+// Automatically attach the latest token to unsafe requests.
+api.interceptors.request.use((config) => {
+  const method = (config.method || "get").toLowerCase();
+
+  if (
+    ["post", "put", "patch", "delete"].includes(method) &&
+    csrfToken
+  ) {
+    config.headers.set("X-CSRFToken", csrfToken);
   }
 
-  return null;
-}
+  return config;
+});
 
-// Health
-export const getHealth = () => api.get("health/");
 
-// Products
+// ============================================================
+// HEALTH
+// ============================================================
+
+export const getHealth = () =>
+  api.get("health/");
+
+
+// ============================================================
+// PRODUCTS
+// ============================================================
+
 export const getProducts = (params = {}) =>
   api.get("products/", { params });
 
 export const getCategories = () =>
   api.get("categories/");
 
-// POS Billing
+
+// ============================================================
+// POS BILLING
+// ============================================================
+
 export const checkoutSale = (data) =>
   api.post("sales/checkout/", data);
 
-// Sales History
+
+// ============================================================
+// SALES HISTORY
+// ============================================================
+
 export const getSalesHistory = () =>
   api.get("sales/history/");
 
-// Inventory
-export const restockProduct = (productId, quantity) =>
-  api.post(`products/${productId}/restock/`, {
-    quantity,
-  });
 
-// Customers
+// ============================================================
+// INVENTORY
+// ============================================================
+
+export const restockProduct = (productId, quantity) =>
+  api.post(
+    `products/${productId}/restock/`,
+    { quantity }
+  );
+
+
+// ============================================================
+// CUSTOMERS
+// ============================================================
+
 export const getCustomers = () =>
   api.get("customers/");
 
@@ -67,30 +111,57 @@ export const updateCustomer = (id, data) =>
 export const deleteCustomer = (id) =>
   api.delete(`customers/${id}/`);
 
-// Authentication
-export const getSession = () =>
-  api.get("auth/session/");
 
-export const loginStaff = (username, password) =>
-  api.post(
+// ============================================================
+// AUTHENTICATION
+// ============================================================
+
+// Fetch session status and the Django CSRF token.
+export const getSession = async () => {
+  const response = await api.get("auth/session/");
+
+  if (response.data?.csrfToken) {
+    setCsrfToken(response.data.csrfToken);
+  }
+
+  return response;
+};
+
+
+// Login using a fresh CSRF token.
+export const loginStaff = async (username, password) => {
+  // Get a fresh CSRF token before login.
+  await getSession();
+
+  const response = await api.post(
     "auth/login/",
-    { username, password },
-    {
-      headers: {
-        "X-CSRFToken": getCookie("csrftoken") || "",
-      },
-    }
+    { username, password }
   );
 
-export const logoutStaff = () =>
-  api.post(
+  // Django rotates the CSRF token after login.
+  if (response.data?.csrfToken) {
+    setCsrfToken(response.data.csrfToken);
+  } else {
+    await getSession();
+  }
+
+  return response;
+};
+
+
+// Logout using a fresh CSRF token.
+export const logoutStaff = async () => {
+  await getSession();
+
+  const response = await api.post(
     "auth/logout/",
-    {},
-    {
-      headers: {
-        "X-CSRFToken": getCookie("csrftoken") || "",
-      },
-    }
+    {}
   );
+
+  setCsrfToken(null);
+
+  return response;
+};
+
 
 export default api;

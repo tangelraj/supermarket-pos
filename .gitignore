@@ -1,0 +1,23 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+
+# Local database
+db.sqlite3
+*.sqlite3
+
+# Django
+staticfiles/
+media/
+
+# React
+node_modules/
+dist/
+
+# Editor
+.vscode/

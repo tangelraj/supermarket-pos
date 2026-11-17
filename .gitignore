@@ -21,3 +21,9 @@ dist/
 
 # Editor
 .vscode/
+billing_backend/local_backup.json
+billing_backend/db_backup_before_restore.sqlite3
+
+
+billing_backend/*.dump
+billing_backend/*.backup

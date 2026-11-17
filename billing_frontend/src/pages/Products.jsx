@@ -6,7 +6,12 @@ export default function Products() {
   const [status, setStatus] = useState("Loading products...");
 
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/api/products/")
+    fetch(
+      `${import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api/"}products/`,
+        {
+         credentials: "include",
+         }
+    )
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);

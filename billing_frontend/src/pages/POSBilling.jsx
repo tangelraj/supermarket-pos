@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   Search,
   ScanBarcode,
-  Camera,
   Plus,
   Minus,
   Trash2,
@@ -17,7 +16,6 @@ import {
 } from "lucide-react";
 
 import { getProducts, checkoutSale } from "../services/api";
-import BarcodeScanner from "../components/BarcodeScanner";
 import UPIPayment from "../components/UPIPayment";
 import { downloadInvoicePdf } from "../services/invoicePdf";
 
@@ -36,7 +34,6 @@ export default function POSBilling() {
   // Checkout
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [showCheckout, setShowCheckout] = useState(false);
-  const [showScanner, setShowScanner] = useState(false);
   const [showBill, setShowBill] = useState(false);
 
   // Saved invoice
@@ -45,7 +42,7 @@ export default function POSBilling() {
   const barcodeRef = useRef(null);
   const submittingRef = useRef(false);
 
-  // Use the actual merchant UPI ID from .env
+  // Merchant UPI ID
   const shopUpiId = import.meta.env.VITE_SHOP_UPI_ID || "";
 
   // Load products from Django
@@ -80,22 +77,30 @@ export default function POSBilling() {
       return;
     }
 
+    const existing = cart.find(
+      (item) => item.id === product.id
+    );
+
+    const stock = Number(product.stock_quantity);
+
+    if (
+      stock <= 0 ||
+      (existing && existing.quantity >= stock)
+    ) {
+      setMessage(`Insufficient stock for ${product.name}`);
+      return;
+    }
+
     setCart((current) => {
-      const existing = current.find(
+      const currentItem = current.find(
         (item) => item.id === product.id
       );
 
-      const stock = Number(product.stock_quantity);
+      if (currentItem) {
+        if (currentItem.quantity >= stock) {
+          return current;
+        }
 
-      if (
-        stock <= 0 ||
-        (existing && existing.quantity >= stock)
-      ) {
-        setMessage(`Insufficient stock for ${product.name}`);
-        return current;
-      }
-
-      if (existing) {
         return current.map((item) =>
           item.id === product.id
             ? { ...item, quantity: item.quantity + 1 }
@@ -103,16 +108,13 @@ export default function POSBilling() {
         );
       }
 
-      return [
-        ...current,
-        { ...product, quantity: 1 },
-      ];
+      return [...current, { ...product, quantity: 1 }];
     });
 
     setMessage(`${product.name} selected`);
   }
 
-  // USB scanner / manual barcode input
+  // USB scanner or manual barcode entry
   function scanBarcode(event) {
     event.preventDefault();
 
@@ -121,7 +123,8 @@ export default function POSBilling() {
     if (!code) return;
 
     const product = products.find(
-      (item) => String(item.barcode ?? "").trim() === code
+      (item) =>
+        String(item.barcode ?? "").trim() === code
     );
 
     if (product) {
@@ -134,24 +137,7 @@ export default function POSBilling() {
     barcodeRef.current?.focus();
   }
 
-  // Camera barcode scanning
-  function handleCameraScan(scannedCode) {
-    setShowScanner(false);
-
-    const code = String(scannedCode).trim();
-
-    const product = products.find(
-      (item) => String(item.barcode ?? "").trim() === code
-    );
-
-    if (product) {
-      addToCart(product);
-    } else {
-      setMessage(`Barcode ${code} not found`);
-    }
-  }
-
-  // Change quantity
+  // Change product quantity
   function updateQuantity(id, change) {
     if (saving || receipt) return;
 
@@ -162,7 +148,10 @@ export default function POSBilling() {
 
           const newQuantity = item.quantity + change;
 
-          if (newQuantity > Number(item.stock_quantity)) {
+          if (
+            newQuantity >
+            Number(item.stock_quantity)
+          ) {
             setMessage(
               `Insufficient stock for ${item.name}`
             );
@@ -178,7 +167,7 @@ export default function POSBilling() {
     );
   }
 
-  // Remove item
+  // Remove product from cart
   function removeItem(id) {
     if (saving || receipt) return;
 
@@ -187,13 +176,17 @@ export default function POSBilling() {
     );
   }
 
-  // Search products
+  // Manual product search
   const filteredProducts = products.filter((product) => {
     const query = search.trim().toLowerCase();
 
     return (
-      product.name.toLowerCase().includes(query) ||
-      String(product.barcode ?? "").includes(query)
+      String(product.name ?? "")
+        .toLowerCase()
+        .includes(query) ||
+      String(product.barcode ?? "")
+        .toLowerCase()
+        .includes(query)
     );
   });
 
@@ -205,7 +198,8 @@ export default function POSBilling() {
 
   const subtotal = cart.reduce(
     (sum, item) =>
-      sum + Number(item.selling_price) * item.quantity,
+      sum +
+      Number(item.selling_price) * item.quantity,
     0
   );
 
@@ -249,7 +243,7 @@ export default function POSBilling() {
         `Bill ${response.data.invoice_number} saved successfully!`
       );
 
-      // Refresh stock after successful sale
+      // Refresh stock after successful checkout
       try {
         await loadProducts();
       } catch (error) {
@@ -262,7 +256,7 @@ export default function POSBilling() {
 
       setMessage(
         detail ||
-        "Checkout could not be confirmed. Check Django Sales before retrying."
+          "Checkout could not be confirmed. Check Django Sales before retrying."
       );
     } finally {
       submittingRef.current = false;
@@ -275,12 +269,10 @@ export default function POSBilling() {
     if (!receipt) return;
 
     setShowBill(false);
-
-    // Print CSS displays only .print-receipt
     window.print();
   }
 
-  // Download PDF
+  // Download PDF invoice
   function handleDownloadPdf() {
     if (!receipt) return;
 
@@ -292,7 +284,7 @@ export default function POSBilling() {
     }
   }
 
-  // Start a new bill
+  // Start new bill
   function newBill() {
     if (saving) return;
 
@@ -302,7 +294,6 @@ export default function POSBilling() {
     setSearch("");
     setPaymentMethod("cash");
     setShowCheckout(false);
-    setShowScanner(false);
     setShowBill(false);
     setMessage("");
 
@@ -313,22 +304,26 @@ export default function POSBilling() {
   return (
     <div className="pos-page">
       <div className="pos-screen">
+
+        {/* PAGE HEADER */}
         <div className="pos-header">
           <div>
             <h2>POS Billing</h2>
             <p>
-              Barcode scanning, UPI payment and bill generation
+              Barcode scanning, manual billing,
+              UPI payment and bill generation
             </p>
           </div>
         </div>
 
+        {/* STATUS MESSAGE */}
         {message && (
           <p role="status" className="pos-message">
             {message}
           </p>
         )}
 
-        {/* Successful checkout actions */}
+        {/* SUCCESSFUL CHECKOUT */}
         {receipt && (
           <div className="pos-success">
             <h3>
@@ -337,11 +332,13 @@ export default function POSBilling() {
             </h3>
 
             <p>
-              Invoice: <strong>{receipt.invoice_number}</strong>
+              Invoice:{" "}
+              <strong>{receipt.invoice_number}</strong>
             </p>
 
             <p>
-              Total: <strong>₹{receipt.total_amount}</strong>
+              Total:{" "}
+              <strong>₹{receipt.total_amount}</strong>
             </p>
 
             <div className="pos-receipt-actions">
@@ -380,20 +377,13 @@ export default function POSBilling() {
         )}
 
         <div className="pos-layout">
-          {/* Product selection */}
+
+          {/* PRODUCT SELECTION */}
           <section className="pos-products">
+
             <h3>Scan Product</h3>
 
-            <button
-              type="button"
-              className="camera-scan-button"
-              onClick={() => setShowScanner(true)}
-              disabled={Boolean(receipt) || saving}
-            >
-              <Camera size={18} />
-              Scan Using Camera
-            </button>
-
+            {/* USB BARCODE SCANNER / MANUAL ENTRY */}
             <form onSubmit={scanBarcode}>
               <div className="pos-input-row">
                 <ScanBarcode size={20} />
@@ -418,6 +408,7 @@ export default function POSBilling() {
               </div>
             </form>
 
+            {/* MANUAL PRODUCT SEARCH */}
             <h3>Manual Product Search</h3>
 
             <div className="pos-input-row">
@@ -429,15 +420,20 @@ export default function POSBilling() {
                   setSearch(event.target.value)
                 }
                 placeholder="Search product name or barcode..."
+                disabled={Boolean(receipt) || saving}
               />
             </div>
 
-            {loading && <p>Loading products...</p>}
-
-            {!loading && filteredProducts.length === 0 && (
-              <p>No products found.</p>
+            {loading && (
+              <p>Loading products...</p>
             )}
 
+            {!loading &&
+              filteredProducts.length === 0 && (
+                <p>No products found.</p>
+              )}
+
+            {/* PRODUCT CARDS */}
             <div className="pos-product-grid">
               {filteredProducts.map((product) => (
                 <button
@@ -454,7 +450,9 @@ export default function POSBilling() {
                   <strong>{product.name}</strong>
 
                   <span>
-                    ₹{Number(product.selling_price).toFixed(2)}
+                    ₹{Number(
+                      product.selling_price
+                    ).toFixed(2)}
                   </span>
 
                   <small>
@@ -467,7 +465,7 @@ export default function POSBilling() {
             </div>
           </section>
 
-          {/* Current bill */}
+          {/* CURRENT BILL */}
           <section className="pos-cart">
             <h3>
               <ShoppingCart size={20} />
@@ -487,10 +485,14 @@ export default function POSBilling() {
                   <strong>{item.name}</strong>
 
                   <p>
-                    ₹{Number(item.selling_price).toFixed(2)} each
+                    ₹{Number(
+                      item.selling_price
+                    ).toFixed(2)}{" "}
+                    each
                   </p>
                 </div>
 
+                {/* QUANTITY CONTROLS */}
                 <div className="pos-quantity">
                   <button
                     type="button"
@@ -535,6 +537,7 @@ export default function POSBilling() {
               </div>
             ))}
 
+            {/* BILL SUMMARY */}
             <div className="pos-summary">
               <p>Items: {totalItems}</p>
 
@@ -557,7 +560,7 @@ export default function POSBilling() {
           </section>
         </div>
 
-        {/* Checkout dialog */}
+        {/* CHECKOUT DIALOG */}
         {showCheckout && (
           <div className="checkout-overlay">
             <div
@@ -589,7 +592,7 @@ export default function POSBilling() {
                 <option value="card">Card</option>
               </select>
 
-              {/* UPI QR code */}
+              {/* UPI QR CODE */}
               {paymentMethod === "upi" && (
                 <UPIPayment
                   amount={subtotal}
@@ -599,8 +602,9 @@ export default function POSBilling() {
               )}
 
               <p className="checkout-note">
-                Test mode: payment is not automatically verified.
-                Generate Bill records the selected payment method.
+                Test mode: payment is not automatically
+                verified. Generate Bill records the
+                selected payment method.
               </p>
 
               <button
@@ -615,7 +619,9 @@ export default function POSBilling() {
 
               <button
                 type="button"
-                onClick={() => setShowCheckout(false)}
+                onClick={() =>
+                  setShowCheckout(false)
+                }
                 disabled={saving}
               >
                 Cancel
@@ -624,15 +630,7 @@ export default function POSBilling() {
           </div>
         )}
 
-        {/* Camera scanner */}
-        {showScanner && (
-          <BarcodeScanner
-            onScan={handleCameraScan}
-            onClose={() => setShowScanner(false)}
-          />
-        )}
-
-        {/* View Bill popup */}
+        {/* VIEW BILL POPUP */}
         {showBill && receipt && (
           <div className="checkout-overlay">
             <div
@@ -663,6 +661,7 @@ export default function POSBilling() {
 
               <hr />
 
+              {/* BILL ITEMS */}
               {receipt.items?.map((item, index) => (
                 <div
                   key={index}
@@ -672,7 +671,8 @@ export default function POSBilling() {
                     <strong>{item.product}</strong>
 
                     <p>
-                      {item.quantity} × ₹{item.unit_price}
+                      {item.quantity} ×
+                      ₹{item.unit_price}
                     </p>
                   </div>
 
@@ -730,7 +730,7 @@ export default function POSBilling() {
         )}
       </div>
 
-      {/* Printable bill */}
+      {/* PRINTABLE RECEIPT */}
       {receipt && (
         <div className="print-receipt">
           <h2>FRESH SUPERMARKET</h2>
@@ -748,7 +748,8 @@ export default function POSBilling() {
               <div>{item.product}</div>
 
               <div>
-                {item.quantity} × ₹{item.unit_price}
+                {item.quantity} ×
+                ₹{item.unit_price}
                 {" = "}
                 ₹{item.line_total}
               </div>
